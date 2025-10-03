@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"time"
 )
 
 // Map functions return a slice of KeyValue.
@@ -39,81 +40,97 @@ func Worker(mapf func(string, string) []KeyValue,
 		args := TaskRequest{}
 		reply := TaskResponse{}
 		CallGetTask(&args, &reply)
-		if reply.Task.TaskType == MapTask {
+		switch reply.Task.TaskType {
+		case MapTask:
 			//map任务
 			DoMapTask(reply.Task, mapf)
-			// callDone()
+			callDone(reply.Task)
+		case ReduceTask:
+			//reduce任务
+			// DoReduceTask(reply.Task, reducef)
+			// callDone(reply.Task)
+		case WaitTask:
+			//等待任务
+			//休息一会再请求
+			time.Sleep(time.Second * 2)
+			fmt.Println("worker wait a while")
+		case ExitTask:
+			//退出任务
+			fmt.Println("worker exit")
+			return
 		}
-
 		// break
-
 	}
 }
 
 func DoMapTask(task *Task, mapf func(string, string) []KeyValue) {
-	fmt.Println("worker do map task ", task.TaskId, " file name ", task.FileName)
+	fmt.Println("worker do map task ", task.TaskId, " file name :", task.FileName)
 	//读文件
-	fileName:=task.FileName
-	file,err:=os.Open(fileName)
-	if err!=nil{
+	fileName := task.FileName
+	file, err := os.Open(fileName)
+	if err != nil {
 		log.Fatalf("cannot open %v", fileName)
 	}
-	content,err:=io.ReadAll(file)
-	if err!=nil{
+	content, err := io.ReadAll(file)
+	if err != nil {
 		log.Fatalf("cannot read %v", fileName)
 	}
 	file.Close()
 
-
 	//中间结果暂存
-	intermidate:=mapf(fileName,string(content))
-	reduceNum:=task.ReduceNum
-
+	intermidate := mapf(fileName, string(content))
+	reduceNum := task.ReduceNum
 
 	//分桶
 	//桶的数量就是reduce的数量, HashKv存放的是map的结果的数组，下标表示桶的编号
 	HashKv := make([][]KeyValue, reduceNum)
-	for _,kv:=range intermidate{
-		bucket:=ihash(kv.Key)%reduceNum
+	for _, kv := range intermidate {
+		bucket := ihash(kv.Key) % reduceNum
 		//把这个map结果放入对应的桶中方便reduce阶段处理
-		HashKv[bucket]=append(HashKv[bucket],kv)
+		HashKv[bucket] = append(HashKv[bucket], kv)
 	}
 	// fmt.Printf("do map task %v, intermidate len %v\n", task.TaskId, len(intermidate))
-	
 
 	//把每个桶写入对应的中间文件
-	for i:=0;i<reduceNum;i++{
-		mapOutPutFileName:=fmt.Sprintf("mr-tmp-%v-%v",task.TaskId,i)
-		mapOutPutFile,err:=os.Create(mapOutPutFileName)
-		if err!=nil{
+	for i := 0; i < reduceNum; i++ {
+		mapOutPutFileName := fmt.Sprintf("mr-tmp-%v-%v", task.TaskId, i)
+		mapOutPutFile, err := os.Create(mapOutPutFileName)
+		if err != nil {
 			log.Fatalf("cannot create %v", mapOutPutFileName)
 		}
-		 enc := json.NewEncoder(mapOutPutFile)
-		 //遍历所有的kv对，写中间文件
-		 for _,kv :=range HashKv[i]{
-			 err := enc.Encode(&kv)
-			 if err != nil {
-				 log.Fatalf("cannot encode %v", kv)
-			 }
-		 }
-		 mapOutPutFile.Close()
-		 os.Rename(mapOutPutFileName, fmt.Sprintf("mr-%v-%v", task.TaskId, i))
+		enc := json.NewEncoder(mapOutPutFile)
+		//遍历所有的kv对，写中间文件
+		for _, kv := range HashKv[i] {
+			err := enc.Encode(&kv)
+			if err != nil {
+				log.Fatalf("cannot encode %v", kv)
+			}
+		}
+		mapOutPutFile.Close()
+		os.Rename(mapOutPutFileName, fmt.Sprintf("mr-%v-%v", task.TaskId, i))
 
 	}
-
-	//发送任务完成的RPC
 
 	fmt.Printf("do map task %v done\n", task.TaskId)
 
-
-
-	
 }
 
-// func callDone() {
-// 	//完成了自己的任务
-// 	args=
-// }
+func callDone(Task *Task) {
+	//完成了自己的任务
+	fmt.Println("worker call done for task ", Task.TaskId)
+	args := TaskDoneRequest{
+		TaskId:   Task.TaskId,
+		TaskType: Task.TaskType,
+	}
+	reply := TaskDoneResponse{}
+	ok := call("Coordinator.TaskDone", &args, &reply)
+	if ok && reply.Ack {
+		fmt.Println("worker call done success for task ", Task.TaskId)
+	} else {
+		fmt.Println("worker call done failed for task ", Task.TaskId)
+	}
+
+}
 
 // example function to show how to make an RPC call to the coordinator.
 //
@@ -156,9 +173,11 @@ func CallGetTask(args *TaskRequest, reply *TaskResponse) {
 	ok := call("Coordinator.GetTask", &args, &reply)
 	if ok {
 		// reply.Y should be 100.
-		fmt.Printf("reply.Task.id %v\n", reply.Task.TaskId)
+		// fmt.Printf("Coordinator.GetTask call success!\n")
+		fmt.Printf("Coordinator.GetTask reply.Task %+v\n", *reply.Task)
+		// fmt.Printf("Coordinator.GetTask reply.Task.id %v reply.Task.type %v\n", reply.Task.TaskId,reply.Task.TaskType)
 	} else {
-		fmt.Printf("call failed!\n")
+		fmt.Printf("Coordinator.GetTask call failed!\n")
 	}
 }
 
