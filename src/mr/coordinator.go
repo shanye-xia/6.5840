@@ -102,7 +102,7 @@ func (c *Coordinator) GetTask(args *TaskRequest, reply *TaskResponse) error {
 				task, ok := <-c.MapTaskChan
 				if !ok {
 					//chan 已关闭，且无更多数据
-					fmt.Println("chan 已关闭，且无更多数据")
+					// fmt.Println("chan 已关闭，且无更多数据")
 					reply.Task = &Task{
 						TaskType: ExitTask,
 						TaskId:   -3,
@@ -143,7 +143,7 @@ func (c *Coordinator) GetTask(args *TaskRequest, reply *TaskResponse) error {
 				task, ok := <-c.ReduceTaskChan
 				if !ok {
 					//chan 已关闭，且无更多数据
-					fmt.Println("chan 已关闭，且无更多数据")
+					// fmt.Println("chan 已关闭，且无更多数据")
 					reply.Task = &Task{
 						TaskType: ExitTask,
 						TaskId:   -3,
@@ -173,24 +173,24 @@ func (c *Coordinator) nextPhase() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	fmt.Println("=================================================================")
+	// fmt.Println("=================================================================")
 	switch c.State {
 	case MapPhase:
 		//进入reduce阶段
 		c.State = ReducePhase
-		fmt.Println("all map tasks done, move to reduce phase")
+		// fmt.Println("all map tasks done, move to reduce phase")
 		//初始化reduce任务队列
 		c.MakeReduceTasks(c.ReduceNum)
 	case ReducePhase:
 		//进入done阶段
 		c.State = DonePhase
-		fmt.Println("all reduce tasks done, move to done phase")
+		// fmt.Println("all reduce tasks done, move to done phase")
 	case DonePhase:
 		//进入done阶段
 		c.State = DonePhase
-		fmt.Println("all tasks have already done!")
+		// fmt.Println("all tasks have already done!")
 	default:
-		log.Fatalf("invalid state %v", c.State)
+		// log.Fatalf("invalid state %v", c.State)
 	}
 
 }
@@ -220,7 +220,7 @@ func (c *Coordinator) Done() bool {
 	// Your code here.
 	if c.State == DonePhase {
 		ret = true
-		fmt.Println("coordinator done!")
+		// fmt.Println("coordinator done!")
 	}
 
 	return ret
@@ -244,10 +244,10 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c.MakeMapTasks(files)
 
-	fmt.Println("coordinator init success!")
+	// fmt.Println("coordinator init success!")
 	// Your code here.
 	go c.crashDetector() //启动任务crash检测协程
-	
+
 	c.server()
 	return &c
 }
@@ -271,16 +271,16 @@ func (c *Coordinator) MakeMapTasks(files []string) {
 		c.taskHandler.addTaskInfo(&Taskinfo)
 		//放入map任务队列
 		c.MapTaskChan <- &task
-		fmt.Printf("make a map task : %+v\n", task)
+		// fmt.Printf("make a map task : %+v\n", task)
 	}
 	// close(c.MapTaskChan) //关闭map任务队列，防止重复添加
-	fmt.Println("make map tasks done!")
+	// fmt.Println("make map tasks done!")
 
 }
 
 func (c *Coordinator) MakeReduceTasks(nReduce int) {
 	//初始化reduce任务队列
-	fmt.Println("make reduce tasks")
+	// fmt.Println("make reduce tasks")
 	for i := 0; i < nReduce; i++ {
 		task := Task{
 			TaskType:    ReduceTask,
@@ -298,10 +298,10 @@ func (c *Coordinator) MakeReduceTasks(nReduce int) {
 		c.taskHandler.addTaskInfo(&Taskinfo)
 		//放入reduce任务队列
 		c.ReduceTaskChan <- &task
-		fmt.Printf("make a reduce task : %+v\n", task)
+		// fmt.Printf("make a reduce task : %+v\n", task)
 	}
 	// close(c.ReduceTaskChan) //关闭reduce任务队列，防止重复添加
-	fmt.Println("make reduce tasks done!")
+	// fmt.Println("make reduce tasks done!")
 }
 
 // 标记任务完成把TaskInfo的taskIsDone设为true
@@ -311,7 +311,7 @@ func (c *Coordinator) TaskDone(args *TaskDoneRequest, reply *TaskDoneResponse) e
 	defer c.mu.Unlock()
 
 	taskId := args.TaskId
-	taskType := args.TaskType
+	// taskType := args.TaskType
 	taskInfo, ok := c.taskHandler.taskMap[taskId]
 	if !ok {
 		log.Fatalf("task %v not found, cannot set done", taskId)
@@ -322,7 +322,7 @@ func (c *Coordinator) TaskDone(args *TaskDoneRequest, reply *TaskDoneResponse) e
 			reply.Ack = true
 		}
 		taskInfo.taskIsDone = true
-		fmt.Printf("task %v of type %v marked as done\n", taskId, taskType)
+		// fmt.Printf("task %v of type %v marked as done\n", taskId, taskType)
 		reply.Ack = true
 	}
 	return nil
@@ -344,7 +344,7 @@ func (c *Coordinator) crashDetector() {
 			crashed := c.taskHandler.cheakCrashedTask(task.TaskId, timeout)
 			if crashed {
 				//任务crash了，重新分发任务
-				fmt.Printf("task %v crashed, reassigning\n", task.TaskId)
+				// fmt.Printf("task %v crashed, reassigning\n", task.TaskId)
 				switch task.TaskType {
 				case MapTask:
 					//重新放入map任务队列
@@ -418,7 +418,7 @@ func getReduceFiles(reduceId int) []string {
 		log.Fatalf("cannot read current directory")
 	}
 	//前缀是mr-,后缀是-reduceId
-	prefix := fmt.Sprintf("mr-")
+	prefix := "mr-"
 	suffix := fmt.Sprintf("-%v", reduceId)
 	//找到前缀是prefix，后缀是suffix的文件
 

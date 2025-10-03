@@ -37,7 +37,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	// declare an argument structure.
 	for {
 		//循环请求任务
-		fmt.Println("worker request task")
+		// fmt.Println("worker request task")
 		args := TaskRequest{}
 		reply := TaskResponse{}
 		CallGetTask(&args, &reply)
@@ -54,10 +54,10 @@ func Worker(mapf func(string, string) []KeyValue,
 			//等待任务
 			//休息一会再请求
 			time.Sleep(time.Second * 2)
-			fmt.Println("worker wait a while")
+			// fmt.Println("worker wait a while")
 		case ExitTask:
 			//退出任务
-			fmt.Println("worker exit")
+			// fmt.Println("worker exit")
 			return
 		}
 		// break
@@ -65,7 +65,7 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func DoMapTask(task *Task, mapf func(string, string) []KeyValue) {
-	fmt.Println("worker do map task ", task.TaskId, " file name :", task.FileName)
+	// fmt.Println("worker do map task ", task.TaskId, " file name :", task.FileName)
 	//读文件
 	fileName := task.FileName
 	file, err := os.Open(fileName)
@@ -90,7 +90,7 @@ func DoMapTask(task *Task, mapf func(string, string) []KeyValue) {
 		//把这个map结果放入对应的桶中方便reduce阶段处理
 		HashKv[bucket] = append(HashKv[bucket], kv)
 	}
-	// fmt.Printf("do map task %v, intermidate len %v\n", task.TaskId, len(intermidate))
+	// // fmt.Printf("do map task %v, intermidate len %v\n", task.TaskId, len(intermidate))
 
 	//把每个桶写入对应的中间文件
 	for i := 0; i < reduceNum; i++ {
@@ -112,16 +112,16 @@ func DoMapTask(task *Task, mapf func(string, string) []KeyValue) {
 
 	}
 
-	fmt.Printf("do map task %v done\n", task.TaskId)
+	// fmt.Printf("do map task %v done\n", task.TaskId)
 
 }
 
 func DoReduceTask(task *Task, reducef func(string, []string) string) {
-	fmt.Println("worker do reduce task ", task.TaskId)
+	// fmt.Println("worker do reduce task ", task.TaskId)
 	ReduceFileNum := task.TaskId - 1000
 	//获取这个reduce任务需要处理的中间文件
 	files := task.ReduceFiles
-	fmt.Printf("reduce task %v get files %v\n", task.TaskId, files)
+	// fmt.Printf("reduce task %v get files %v\n", task.TaskId, files)
 	//读取文件得到所有的intermediate
 	var intermediate []KeyValue
 	for _, file := range files {
@@ -139,7 +139,7 @@ func DoReduceTask(task *Task, reducef func(string, []string) string) {
 		}
 		f.Close()
 	}
-	fmt.Printf("reduce task %v read all files done, kvs len %v\n", task.TaskId, len(intermediate))
+	// fmt.Printf("reduce task %v read all files done, kvs len %v\n", task.TaskId, len(intermediate))
 
 	//对kvs进行排序
 	shuffle(intermediate)
@@ -163,7 +163,7 @@ func DoReduceTask(task *Task, reducef func(string, []string) string) {
 			values = append(values, intermediate[k].Value)
 		}
 		output := reducef(intermediate[i].Key, values)
-		// fmt.Printf("reduce task %v reduce key %v values %v output %v\n", task.TaskId, intermediate[i].Key, values, output)
+		// // fmt.Printf("reduce task %v reduce key %v values %v output %v\n", task.TaskId, intermediate[i].Key, values, output)
 		//写入输出文件
 		fmt.Fprintf(reduceOutPutFile, "%v %v\n", intermediate[i].Key, output)
 		i = j
@@ -171,7 +171,7 @@ func DoReduceTask(task *Task, reducef func(string, []string) string) {
 	reduceOutPutFile.Close()
 	//重命名输出文件
 	os.Rename(reduceOutPutFileName, fmt.Sprintf("mr-out-%v", ReduceFileNum))
-	fmt.Printf("do reduce task %v done\n", ReduceFileNum)
+	// fmt.Printf("do reduce task %v done\n", ReduceFileNum)
 }
 
 
@@ -182,12 +182,12 @@ func shuffle(kvs []KeyValue) {
 	sort.Slice(kvs, func(i, j int) bool {
 		return kvs[i].Key < kvs[j].Key
 	})
-	fmt.Printf("after sort kvs len %v\n", len(kvs))
+	// fmt.Printf("after sort kvs len %v\n", len(kvs))
 }
 
 func callDone(Task *Task) {
 	//完成了自己的任务
-	fmt.Println("worker call done for task ", Task.TaskId)
+	// fmt.Println("worker call done for task ", Task.TaskId)
 	args := TaskDoneRequest{
 		TaskId:   Task.TaskId,
 		TaskType: Task.TaskType,
@@ -195,9 +195,9 @@ func callDone(Task *Task) {
 	reply := TaskDoneResponse{}
 	ok := call("Coordinator.TaskDone", &args, &reply)
 	if ok && reply.Ack {
-		fmt.Println("worker call done success for task ", Task.TaskId)
+		// fmt.Println("worker call done success for task ", Task.TaskId)
 	} else {
-		fmt.Println("worker call done failed for task ", Task.TaskId)
+		// fmt.Println("worker call done failed for task ", Task.TaskId)
 	}
 
 }
@@ -223,9 +223,9 @@ func CallExample() {
 	ok := call("Coordinator.Example", &args, &reply)
 	if ok {
 		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
+		// fmt.Printf("reply.Y %v\n", reply.Y)
 	} else {
-		fmt.Printf("call failed!\n")
+		// fmt.Printf("call failed!\n")
 	}
 }
 
@@ -243,11 +243,11 @@ func CallGetTask(args *TaskRequest, reply *TaskResponse) {
 	ok := call("Coordinator.GetTask", &args, &reply)
 	if ok {
 		// reply.Y should be 100.
-		// fmt.Printf("Coordinator.GetTask call success!\n")
-		fmt.Printf("Coordinator.GetTask reply.Task %+v\n", *reply.Task)
-		// fmt.Printf("Coordinator.GetTask reply.Task.id %v reply.Task.type %v\n", reply.Task.TaskId,reply.Task.TaskType)
+		// // fmt.Printf("Coordinator.GetTask call success!\n")
+		// fmt.Printf("Coordinator.GetTask reply.Task %+v\n", *reply.Task)
+		// // fmt.Printf("Coordinator.GetTask reply.Task.id %v reply.Task.type %v\n", reply.Task.TaskId,reply.Task.TaskType)
 	} else {
-		fmt.Printf("Coordinator.GetTask call failed!\n")
+		// fmt.Printf("Coordinator.GetTask call failed!\n")
 	}
 }
 
@@ -268,6 +268,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	// fmt.Println(err)
 	return false
 }
