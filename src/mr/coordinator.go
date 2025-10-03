@@ -242,23 +242,12 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		},
 	}
 
-	// //初始化map任务队列
-	// for index, file := range c.Files {
-	// 	task := Task{
-	// 		TaskType:  0,
-	// 		FileName:  file,
-	// 		TaskId:    index,
-	// 		ReduceNum: c.ReduceNum,
-	// 		// ReduceNum: nReduce,
-	// 	}
-	// 	//放入map任务队列
-	// 	c.MapTaskChan <- &task
-	// }
 	c.MakeMapTasks(files)
 
 	fmt.Println("coordinator init success!")
 	// Your code here.
-
+	go c.crashDetector() //启动任务crash检测协程
+	
 	c.server()
 	return &c
 }
@@ -284,7 +273,7 @@ func (c *Coordinator) MakeMapTasks(files []string) {
 		c.MapTaskChan <- &task
 		fmt.Printf("make a map task : %+v\n", task)
 	}
-	close(c.MapTaskChan) //关闭map任务队列，防止重复添加
+	// close(c.MapTaskChan) //关闭map任务队列，防止重复添加
 	fmt.Println("make map tasks done!")
 
 }
@@ -311,7 +300,7 @@ func (c *Coordinator) MakeReduceTasks(nReduce int) {
 		c.ReduceTaskChan <- &task
 		fmt.Printf("make a reduce task : %+v\n", task)
 	}
-	close(c.ReduceTaskChan) //关闭reduce任务队列，防止重复添加
+	// close(c.ReduceTaskChan) //关闭reduce任务队列，防止重复添加
 	fmt.Println("make reduce tasks done!")
 }
 
@@ -339,6 +328,46 @@ func (c *Coordinator) TaskDone(args *TaskDoneRequest, reply *TaskDoneResponse) e
 	return nil
 }
 
+func (c *Coordinator) crashDetector() {
+	//定时检测任务是否crash了
+	for {
+		time.Sleep(time.Second * 2)
+		c.mu.Lock()
+		if c.State == DonePhase {
+			c.mu.Unlock()
+			break //任务完成了，退出
+		}
+		var timeout int64 = 10
+		for _, taskInfo := range c.taskHandler.taskMap {
+			task := taskInfo.Task
+			//判断任务是否crash了
+			crashed := c.taskHandler.cheakCrashedTask(task.TaskId, timeout)
+			if crashed {
+				//任务crash了，重新分发任务
+				fmt.Printf("task %v crashed, reassigning\n", task.TaskId)
+				switch task.TaskType {
+				case MapTask:
+					//重新放入map任务队列
+					c.MapTaskChan <- task
+					taskInfo.Task.TaskType = MapTask
+					taskInfo.StartTime = time.Now().Unix() //更新开始时间
+					taskInfo.taskIsDone = false            //重置任务状态
+				case ReduceTask:
+					//重新放入reduce任务队列
+					c.ReduceTaskChan <- task
+					taskInfo.Task.TaskType = ReduceTask
+					taskInfo.StartTime = time.Now().Unix() //更新开始时间
+					taskInfo.taskIsDone = false            //重置任务状态
+				default:
+					log.Fatalf("invalid task type %v", task.TaskType)
+				}
+
+			}
+		}
+		c.mu.Unlock()
+	}
+}
+
 // 初始化的时候添加任务信息
 func (taskHandler *TaskHandler) addTaskInfo(Taskinfo *Taskinfo) {
 	//防止重复添加
@@ -360,6 +389,24 @@ func (taskHandler *TaskHandler) cheakPhaseDone() bool {
 		}
 	}
 	return true
+}
+
+func (taskHandler *TaskHandler) cheakCrashedTask(taskid int, timeout int64) bool {
+	//判断这个任务是否crash了
+	taskInfo, ok := taskHandler.taskMap[taskid]
+	if !ok {
+		log.Fatalf("task %v not found, cannot cheak crashed", taskid)
+		return false
+	}
+	if time.Now().Unix()-taskInfo.StartTime > timeout {
+		//超过10秒没有完成，认为crash了
+		return true
+	} else {
+		taskInfo.StartTime = time.Now().Unix() //更新开始时间
+		//没有crash
+		return false
+	}
+
 }
 
 func getReduceFiles(reduceId int) []string {
