@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"sync"
 	"time"
 )
 
 type Coordinator struct {
-	State          int // 0 for map, 1 for reduce,2 for done
+	mu             sync.Mutex // 互斥锁，保护共享数据
+	State          int        // 0 for map, 1 for reduce,2 for done
 	MapTaskChan    chan *Task
 	ReduceTaskChan chan *Task
 	ReduceNum      int         // Reduce的数量
@@ -37,11 +39,11 @@ const (
 )
 
 type Task struct {
-	TaskType  TaskType // 0 for map 1 for reduce 2 for wait 3 for exit
-	FileName  string
-	TaskId    int
+	TaskType    TaskType // 0 for map 1 for reduce 2 for wait 3 for exit
+	FileName    string
+	TaskId      int
 	ReduceFiles []string // map任务产生的中间文件名列表，reduce任务需要用到
-	ReduceNum int // Reduce的数量
+	ReduceNum   int      // Reduce的数量
 }
 
 type TaskType int
@@ -77,7 +79,6 @@ func (c *Coordinator) GetTask(args *TaskRequest, reply *TaskResponse) error {
 				if phaseDone {
 					//任务完成了，进入下一个阶段，Reduce
 					c.nextPhase()
-					fmt.Println("all map tasks done, move to reduce phase")
 					//通知worker任务完成，退出
 					reply.Task = &Task{
 						TaskType: ExitTask,
@@ -98,16 +99,59 @@ func (c *Coordinator) GetTask(args *TaskRequest, reply *TaskResponse) error {
 				// log.Printf("coordinator get task %+v", reply.Task)
 			} else {
 				//还有任务没有分发，进行任务的分发
-				reply.Task = <-c.MapTaskChan
+				task, ok := <-c.MapTaskChan
+				if !ok {
+					//chan 已关闭，且无更多数据
+					fmt.Println("chan 已关闭，且无更多数据")
+					reply.Task = &Task{
+						TaskType: ExitTask,
+						TaskId:   -3,
+						FileName: "ExitTask",
+					}
+				} else {
+					reply.Task = task
+				}
+
 			}
 		}
 	case ReducePhase:
 		{
-			//从reduce任务队列中获取任务，这里先模拟完成所有任务了
-			reply.Task = &Task{
-				TaskType: ExitTask,
-				TaskId:   -3,
-				FileName: "ExitTask",
+			//reduce阶段
+			//先判断一下有没有任务
+			if len(c.ReduceTaskChan) == 0 { //没有任务了，判断一下任务是否都完成了
+				phaseDone := c.taskHandler.cheakPhaseDone()
+				if phaseDone {
+					//任务完成了，进入下一个阶段，Done
+					c.nextPhase()
+					//通知worker任务完成，退出
+					reply.Task = &Task{
+						TaskType: ExitTask,
+						TaskId:   -3,
+						FileName: "ExitTask",
+					}
+				} else {
+					//任务还有没完成的，发送一个等待任务，状态为WaitTask，让worker等待一会在进行请求
+					reply.Task = &Task{
+						TaskType: WaitTask,
+						TaskId:   -2,
+						FileName: "WaitTask",
+					}
+
+				}
+			} else {
+				//还有任务没有分发，进行任务的分发
+				task, ok := <-c.ReduceTaskChan
+				if !ok {
+					//chan 已关闭，且无更多数据
+					fmt.Println("chan 已关闭，且无更多数据")
+					reply.Task = &Task{
+						TaskType: ExitTask,
+						TaskId:   -3,
+						FileName: "ExitTask",
+					}
+				} else {
+					reply.Task = task
+				}
 			}
 		}
 	case DonePhase:
@@ -121,20 +165,30 @@ func (c *Coordinator) GetTask(args *TaskRequest, reply *TaskResponse) error {
 		}
 
 	}
-
 	return nil
 }
 
 func (c *Coordinator) nextPhase() {
+	//保护共享数据
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	fmt.Println("=================================================================")
 	switch c.State {
 	case MapPhase:
 		//进入reduce阶段
 		c.State = ReducePhase
-		fmt.Println("=================================================================")
-	case ReducePhase, DonePhase:
+		fmt.Println("all map tasks done, move to reduce phase")
+		//初始化reduce任务队列
+		c.MakeReduceTasks(c.ReduceNum)
+	case ReducePhase:
 		//进入done阶段
 		c.State = DonePhase
-		fmt.Println("all tasks done!")
+		fmt.Println("all reduce tasks done, move to done phase")
+	case DonePhase:
+		//进入done阶段
+		c.State = DonePhase
+		fmt.Println("all tasks have already done!")
 	default:
 		log.Fatalf("invalid state %v", c.State)
 	}
@@ -158,9 +212,16 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Your code here.
 	ret := false
 
 	// Your code here.
+	if c.State == DonePhase {
+		ret = true
+		fmt.Println("coordinator done!")
+	}
 
 	return ret
 }
@@ -223,35 +284,43 @@ func (c *Coordinator) MakeMapTasks(files []string) {
 		c.MapTaskChan <- &task
 		fmt.Printf("make a map task : %+v\n", task)
 	}
+	close(c.MapTaskChan) //关闭map任务队列，防止重复添加
+	fmt.Println("make map tasks done!")
 
 }
 
 func (c *Coordinator) MakeReduceTasks(nReduce int) {
 	//初始化reduce任务队列
+	fmt.Println("make reduce tasks")
 	for i := 0; i < nReduce; i++ {
 		task := Task{
-			TaskType:  ReduceTask,
-			ReduceFiles:  getReduceFiles(i), //获取这个reduce任务需要处理的中间文件
-			TaskId:    i + 1000, // reduce任务id从1000开始
-			ReduceNum: c.ReduceNum,
+			TaskType:    ReduceTask,
+			ReduceFiles: getReduceFiles(i), //获取这个reduce任务需要处理的中间文件
+			TaskId:      i + 1000,          // reduce任务id从1000开始
+			ReduceNum:   c.ReduceNum,
 		}
-		fmt.Printf("make a reduce task : %+v\n", task)
 
 		Taskinfo := Taskinfo{
 			StartTime:  time.Now().Unix(),
 			Task:       &task,
 			taskIsDone: false,
 		}
-		
+
 		c.taskHandler.addTaskInfo(&Taskinfo)
 		//放入reduce任务队列
 		c.ReduceTaskChan <- &task
 		fmt.Printf("make a reduce task : %+v\n", task)
 	}
+	close(c.ReduceTaskChan) //关闭reduce任务队列，防止重复添加
+	fmt.Println("make reduce tasks done!")
 }
 
 // 标记任务完成把TaskInfo的taskIsDone设为true
 func (c *Coordinator) TaskDone(args *TaskDoneRequest, reply *TaskDoneResponse) error {
+	//保护共享数据
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	taskId := args.TaskId
 	taskType := args.TaskType
 	taskInfo, ok := c.taskHandler.taskMap[taskId]
@@ -314,4 +383,3 @@ func getReduceFiles(reduceId int) []string {
 	}
 	return files
 }
-

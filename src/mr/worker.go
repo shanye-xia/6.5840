@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -47,8 +48,8 @@ func Worker(mapf func(string, string) []KeyValue,
 			callDone(reply.Task)
 		case ReduceTask:
 			//reduce任务
-			// DoReduceTask(reply.Task, reducef)
-			// callDone(reply.Task)
+			DoReduceTask(reply.Task, reducef)
+			callDone(reply.Task)
 		case WaitTask:
 			//等待任务
 			//休息一会再请求
@@ -113,6 +114,75 @@ func DoMapTask(task *Task, mapf func(string, string) []KeyValue) {
 
 	fmt.Printf("do map task %v done\n", task.TaskId)
 
+}
+
+func DoReduceTask(task *Task, reducef func(string, []string) string) {
+	fmt.Println("worker do reduce task ", task.TaskId)
+	ReduceFileNum := task.TaskId - 1000
+	//获取这个reduce任务需要处理的中间文件
+	files := task.ReduceFiles
+	fmt.Printf("reduce task %v get files %v\n", task.TaskId, files)
+	//读取文件得到所有的intermediate
+	var intermediate []KeyValue
+	for _, file := range files {
+		f, err := os.Open(file)
+		if err != nil {
+			log.Fatalf("cannot open %v", file)
+		}
+		dec := json.NewDecoder(f)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate, kv)
+		}
+		f.Close()
+	}
+	fmt.Printf("reduce task %v read all files done, kvs len %v\n", task.TaskId, len(intermediate))
+
+	//对kvs进行排序
+	shuffle(intermediate)
+
+	//创建输出文件
+	reduceOutPutFileName := fmt.Sprintf("mr-tmp-%v", ReduceFileNum)
+	reduceOutPutFile, err := os.Create(reduceOutPutFileName)
+	if err != nil {
+		log.Fatalf("cannot create %v", reduceOutPutFileName)
+	}
+
+	//进行count
+	for i := 0; i < len(intermediate); {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		//此时 [i,j) 的key都一样
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+		// fmt.Printf("reduce task %v reduce key %v values %v output %v\n", task.TaskId, intermediate[i].Key, values, output)
+		//写入输出文件
+		fmt.Fprintf(reduceOutPutFile, "%v %v\n", intermediate[i].Key, output)
+		i = j
+	}
+	reduceOutPutFile.Close()
+	//重命名输出文件
+	os.Rename(reduceOutPutFileName, fmt.Sprintf("mr-out-%v", ReduceFileNum))
+	fmt.Printf("do reduce task %v done\n", ReduceFileNum)
+}
+
+
+
+func shuffle(kvs []KeyValue) {
+	//对kvs进行排序
+	// 按key排序
+	sort.Slice(kvs, func(i, j int) bool {
+		return kvs[i].Key < kvs[j].Key
+	})
+	fmt.Printf("after sort kvs len %v\n", len(kvs))
 }
 
 func callDone(Task *Task) {
