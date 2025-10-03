@@ -39,10 +39,12 @@ func Worker(mapf func(string, string) []KeyValue,
 		args := TaskRequest{}
 		reply := TaskResponse{}
 		CallGetTask(&args, &reply)
-		if reply.Task.TaskType == 0 {
+		if reply.Task.TaskType == MapTask {
 			//map任务
 			DoMapTask(reply.Task, mapf)
+			// callDone()
 		}
+
 		// break
 
 	}
@@ -107,6 +109,11 @@ func DoMapTask(task *Task, mapf func(string, string) []KeyValue) {
 
 	
 }
+
+// func callDone() {
+// 	//完成了自己的任务
+// 	args=
+// }
 
 // example function to show how to make an RPC call to the coordinator.
 //
